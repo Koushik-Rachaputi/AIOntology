@@ -123,13 +123,13 @@ class Neo4jService:
 
     @staticmethod
     def store_ontology(ontology):
-        """Store ontology relationships in Neo4j while ensuring proper connections."""
+        """Store ontology in Neo4j while preventing duplicate nodes, relationships, and ensuring only table-to-table connections."""
         try:
             existing_tables = Neo4jService.get_existing_tables()
             if isinstance(existing_tables, dict) and "error" in existing_tables:
                 return existing_tables  # Return error message if fetching tables failed
 
-            # Ensure all tables (nodes) are created
+            # Step 1: Ensure all Table nodes are created (Check before inserting)
             for node in ontology.get("nodes", []):
                 table_name = node["label"]
                 if table_name not in existing_tables:  # Only create if not exists
@@ -137,55 +137,77 @@ class Neo4jService:
                         MERGE (t:Table {name: $name})
                     """, {"name": table_name})
 
-            # Ensure column nodes are created and linked to tables
+            # Step 2: Ensure Column nodes are created and linked to their respective Table nodes
             for node in ontology.get("nodes", []):
                 table_name = node["label"]
                 for column in node.get("columns", []):
+                    column_name = column["name"]
+                    column_type = column["type"]
+                    new_values = set(column.get("values", []))  # Convert list to set for comparison
+
+                    # Fetch existing values for the column (if it exists)
+                    existing_col = neo4j_conn.query("""
+                        MATCH (c:Column {name: $col_name}) RETURN c.values AS values
+                    """, {"col_name": column_name})
+
+                    existing_values = set(existing_col[0]["values"]) if existing_col and "values" in existing_col[0] else set()
+
+                    # Merge only if the column does not already exist
                     neo4j_conn.query("""
                         MERGE (c:Column {name: $col_name, type: $col_type})
                         WITH c
                         MATCH (t:Table {name: $table_name})
                         MERGE (t)-[:HAS_COLUMN]->(c)
                     """, {
-                        "col_name": column["name"],
-                        "col_type": column["type"],
+                        "col_name": column_name,
+                        "col_type": column_type,
                         "table_name": table_name
                     })
 
-                    # Store sample values as properties of column nodes
-                    if "sample_values" in column:
+                    # Only update values if new ones are detected
+                    if not new_values.issubset(existing_values):
+                        updated_values = list(existing_values.union(new_values))
                         neo4j_conn.query("""
                             MATCH (c:Column {name: $col_name})
                             SET c.values = $values
                         """, {
-                            "col_name": column["name"],
-                            "values": column["sample_values"]
+                            "col_name": column_name,
+                            "values": updated_values
                         })
 
-            # Refresh the existing tables list after inserting new nodes
+            # Step 3: Ensure table-to-table relationships (avoid duplicates)
             existing_tables = Neo4jService.get_existing_tables()
 
-            # Ensure relationships between tables are created
             for rel in ontology.get("relationships", []):
                 start_node = rel["start_node"]
                 end_node = rel["end_node"]
 
-                # Ensure both nodes exist before creating a relationship
+                # Ensure both nodes exist and avoid duplicate relationships
                 if start_node in existing_tables and end_node in existing_tables:
-                    neo4j_conn.query("""
-                        MATCH (t1:Table {name: $start_node})
-                        MATCH (t2:Table {name: $end_node})
-                        MERGE (t1)-[:CONNECTED_TO {type: $type, reason: $reason}]->(t2)
+                    existing_rel = neo4j_conn.query("""
+                        MATCH (t1:Table {name: $start_node})-[r:CONNECTED_TO]->(t2:Table {name: $end_node})
+                        RETURN COUNT(r) AS rel_count
                     """, {
                         "start_node": start_node,
-                        "end_node": end_node,
-                        "type": rel["type"],
-                        "reason": rel["reason"]
+                        "end_node": end_node
                     })
 
-            return {"message": "Ontology updated successfully with new relationships and column data"}
+                    # Only create relationship if it doesn't already exist
+                    if existing_rel[0]["rel_count"] == 0:
+                        neo4j_conn.query("""
+                            MATCH (t1:Table {name: $start_node})
+                            MATCH (t2:Table {name: $end_node})
+                            MERGE (t1)-[:CONNECTED_TO {type: $type, reason: $reason}]->(t2)
+                        """, {
+                            "start_node": start_node,
+                            "end_node": end_node,
+                            "type": rel["type"],
+                            "reason": rel["reason"]
+                        })
+
+            return {"message": "Ontology updated successfully with duplicate checks in place"}
 
         except Exception as e:
             return {"error": str(e)}
-
+         
 
