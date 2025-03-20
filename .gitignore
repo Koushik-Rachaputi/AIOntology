@@ -1,0 +1,41 @@
+# Python-related ignores
+__pycache__/
+*.py[cod]
+*.so
+*.pyd
+*.swp
+*.swo
+*.DS_Store
+
+# Virtual environment
+venv/
+.env
+*.env
+
+# Logs and temp files
+logs/
+*.log
+*.out
+*.pid
+*.gz
+
+# IDE and editor files
+.vscode/
+.idea/
+*.iml
+
+# Byte-compiled / optimized / DLL files
+*.pyc
+*.pyo
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Docker-related files
+*.dockerignore
+docker-compose.override.yml

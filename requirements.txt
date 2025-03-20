@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+neo4j
+openai==0.28
+pandas
+dotenv
