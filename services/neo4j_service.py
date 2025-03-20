@@ -62,17 +62,35 @@ class Neo4jService:
         
     @staticmethod
     def list_all_nodes_with_relationships():
-        """Retrieve all nodes, relationships, and the database name."""
+        """Retrieve all tables, columns with row values, and table-to-table relationships."""
         try:
-            # Fetch all nodes
-            nodes_result = neo4j_conn.query("MATCH (n:Table) RETURN n.name AS table_name")
-            nodes = [record["table_name"] for record in nodes_result]
+            # Fetch all table nodes
+            tables_result = neo4j_conn.query("MATCH (t:Table) RETURN t.name AS table_name")
+            tables = [record["table_name"] for record in tables_result]
 
-            # Fetch all relationships
+            # Fetch all columns with their stored row values
+            columns_result = neo4j_conn.query("""
+                MATCH (t:Table)-[:HAS_COLUMN]->(c:Column)
+                RETURN t.name AS table_name, c.name AS column_name, c.type AS column_type, c.values AS row_values
+            """)
+
+            columns = {}
+            for record in columns_result:
+                table_name = record["table_name"]
+                if table_name not in columns:
+                    columns[table_name] = []
+                columns[table_name].append({
+                    "name": record["column_name"],
+                    "type": record["column_type"],
+                    "values": record["row_values"] if "row_values" in record and record["row_values"] else []
+                })
+
+            # Fetch all table-to-table relationships
             relationships_result = neo4j_conn.query("""
                 MATCH (t1:Table)-[r:CONNECTED_TO]->(t2:Table) 
                 RETURN t1.name AS start_node, t2.name AS end_node, r.type AS type, r.reason AS reason
             """)
+
             relationships = [
                 {
                     "start_node": record["start_node"],
@@ -85,11 +103,14 @@ class Neo4jService:
 
             return {
                 "database": "neo4j",
-                "nodes": nodes,
+                "tables": tables,
+                "columns": columns,
                 "relationships": relationships
             }
+
         except Exception as e:
             return {"error": str(e)}
+
 
 
     # @staticmethod
